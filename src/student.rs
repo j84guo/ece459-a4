@@ -34,25 +34,27 @@ impl Student {
             let pkgs_required = idea.num_packages;
             if pkgs_required <= self.pkgs.len() {
                 // TODO: Critical section too large
-                let (mut idea_checksum, mut pkg_checksum) =
-                    (idea_checksum.lock().unwrap(), pkg_checksum.lock().unwrap());
+                {
+                    let (mut idea_checksum, mut pkg_checksum) =
+                        (idea_checksum.lock().unwrap(), pkg_checksum.lock().unwrap());
 
-                // Update idea and package checksums
-                // All of the packages used in the update are deleted, along with the idea
-                idea_checksum.update(Checksum::with_sha256(&idea.name));
-                let pkgs_used = self.pkgs.drain(0..pkgs_required).collect::<Vec<_>>();
-                for pkg in pkgs_used.iter() {
-                    pkg_checksum.update(Checksum::with_sha256(&pkg.name));
-                }
+                    // Update idea and package checksums
+                    // All of the packages used in the update are deleted, along with the idea
+                    idea_checksum.update(Checksum::with_sha256(&idea.name));
+                    let pkgs_used = self.pkgs.drain(0..pkgs_required).collect::<Vec<_>>();
+                    for pkg in pkgs_used.iter() {
+                        pkg_checksum.update(Checksum::with_sha256(&pkg.name));
+                    }
 
-                // TODO: Build message before printing?
-                // We want the subsequent prints to be together, so we lock stdout
-                let stdout = stdout();
-                let mut handle = stdout.lock();
-                writeln!(handle, "\nStudent {} built {} using {} packages\nIdea checksum: {}\nPackage checksum: {}",
-                    self.id, idea.name, pkgs_required, idea_checksum, pkg_checksum).unwrap();
-                for pkg in pkgs_used.iter() {
-                    writeln!(handle, "> {}", pkg.name).unwrap();
+                    // TODO: Build message before printing?
+                    // We want the subsequent prints to be together, so we lock stdout
+                    let stdout = stdout();
+                    let mut handle = stdout.lock();
+                    writeln!(handle, "\nStudent {} built {} using {} packages\nIdea checksum: {}\nPackage checksum: {}",
+                             self.id, idea.name, pkgs_required, idea_checksum, pkg_checksum).unwrap();
+                    for pkg in pkgs_used.iter() {
+                        writeln!(handle, "> {}", pkg.name).unwrap();
+                    }
                 }
 
                 self.idea = None;

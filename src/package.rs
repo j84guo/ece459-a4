@@ -41,10 +41,13 @@ impl PackageDownloader {
 
             // TODO: Maybe XOR in each thread locally and then combine later?
             // TODO: Critical section too large
-            pkg_checksum
-                .lock()
-                .unwrap()
-                .update(Checksum::with_sha256(&name));
+            {
+                pkg_checksum
+                    .lock()
+                    .unwrap()
+                    .update(Checksum::with_sha256(&name));
+            }
+
             self.package_send
                 .send(Event::DownloadComplete(Package { name }))
                 .unwrap();

@@ -59,10 +59,12 @@ impl IdeaGenerator {
             };
 
             // TODO: Maybe XOR in each thread locally and then combine later?
-            idea_checksum
-                .lock()
-                .unwrap()
-                .update(Checksum::with_sha256(&idea.name));
+            {
+                idea_checksum
+                    .lock()
+                    .unwrap()
+                    .update(Checksum::with_sha256(&idea.name));
+            }
 
             self.idea_send.send(Event::NewIdea(idea)).unwrap();
         }
