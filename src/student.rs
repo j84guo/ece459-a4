@@ -31,8 +31,9 @@ impl Student {
     ) {
         if let Some(ref idea) = self.idea {
             // Can only build ideas if we have acquired sufficient packages
-            let pkgs_required = idea.num_pkg_required;
+            let pkgs_required = idea.num_packages;
             if pkgs_required <= self.pkgs.len() {
+                // TODO: Critical section too large
                 let (mut idea_checksum, mut pkg_checksum) =
                     (idea_checksum.lock().unwrap(), pkg_checksum.lock().unwrap());
 
@@ -44,6 +45,7 @@ impl Student {
                     pkg_checksum.update(Checksum::with_sha256(&pkg.name));
                 }
 
+                // TODO: Build message before printing?
                 // We want the subsequent prints to be together, so we lock stdout
                 let stdout = stdout();
                 let mut handle = stdout.lock();
