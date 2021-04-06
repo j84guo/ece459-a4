@@ -81,25 +81,25 @@ fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
     let (send, recv) = unbounded::<Event>();
 
     // Checksums of all the generated ideas and packages
-    let mut idea_checksum = Arc::new(Mutex::new(Checksum::default()));
-    let mut package_checksum = Arc::new(Mutex::new(Checksum::default()));
+    let mut idea_checksum = Checksum::default();
+    let mut package_checksum = Checksum::default();
 
     // Checksums of the ideas and packages used by students to build ideas. Should match the
-    // previous checksums.
-    let mut student_idea_checksum = Arc::new(Mutex::new(Checksum::default()));
-    let mut student_package_checksum = Arc::new(Mutex::new(Checksum::default()));
+    // previous checksums
+    let mut student_idea_checksum = Checksum::default();
+    let mut student_package_checksum = Checksum::default();
 
-    // Store all spawned threads.
-    let mut threads = vec![];
+    // Store all spawned threads
+    let mut student_threads = vec![];
+    let mut package_downloader_threads = vec![];
+    let mut idea_generator_threads = vec![];
 
     // Spawn num_students student threads.
     for i in 0..args.num_students {
         Sender::clone(&send);
         let mut student = Student::new(i, send.clone(), recv.clone());
-        let student_idea_checksum = student_idea_checksum.clone();
-        let student_pkg_checksum = student_package_checksum.clone();
-        let thread = spawn(move || student.run(student_idea_checksum, student_pkg_checksum));
-        threads.push(thread);
+        let thread = spawn(move || student.run());
+        student_threads.push(thread);
     }
 
     // Spawn num_pkg_gen package downloader threads. Packages are distributed evenly across threads.
@@ -107,12 +107,16 @@ fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
     let mut start_i = 0;
     for i in 0..args.num_package_downloaders {
         let num_packages = per_thread_amount(i, args.num_packages, args.num_package_downloaders);
-        let downloader = PackageDownloader::new(packages.clone(), start_i, num_packages, send.clone());
+        let mut downloader = PackageDownloader::new(
+            packages.clone(),
+            start_i,
+            num_packages,
+            send.clone()
+        );
         start_i += num_packages;
-        let package_checksum = Arc::clone(&package_checksum);
 
-        let thread = spawn(move || downloader.run(package_checksum));
-        threads.push(thread);
+        let thread = spawn(move || downloader.run());
+        package_downloader_threads.push(thread);
     }
     assert_eq!(start_i, args.num_packages);
 
@@ -125,7 +129,7 @@ fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
         let num_ideas = per_thread_amount(i, args.num_ideas, args.num_idea_generators);
         let num_packages = per_thread_amount(i, args.num_packages, args.num_idea_generators);
         let num_students = per_thread_amount(i, args.num_students, args.num_idea_generators);
-        let generator = IdeaGenerator::new(
+        let mut generator = IdeaGenerator::new(
             ideas.clone(),
             start_i,
             num_ideas,
@@ -133,30 +137,30 @@ fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
             num_packages,
             send.clone(),
         );
-        let idea_checksum = idea_checksum.clone();
         start_i += num_ideas;
 
-        let thread = spawn(move || generator.run(idea_checksum));
-        threads.push(thread);
+        let thread = spawn(move || generator.run());
+        idea_generator_threads.push(thread);
     }
     assert_eq!(start_i, args.num_ideas);
 
     // Join all threads
-    threads.into_iter().for_each(|t| t.join().unwrap());
-
-    let idea = Arc::get_mut(&mut idea_checksum).unwrap().get_mut().unwrap();
-    let student_idea = Arc::get_mut(&mut student_idea_checksum)
-        .unwrap()
-        .get_mut()
-        .unwrap();
-    let pkg = Arc::get_mut(&mut package_checksum).unwrap().get_mut().unwrap();
-    let student_pkg = Arc::get_mut(&mut student_package_checksum)
-        .unwrap()
-        .get_mut()
-        .unwrap();
+    for t in student_threads.into_iter() {
+        let checksums = t.join().unwrap();
+        student_idea_checksum.update(checksums.0);
+        student_package_checksum.update(checksums.1);
+    }
+    for t in package_downloader_threads.into_iter() {
+        let checksum = t.join().unwrap();
+        package_checksum.update(checksum);
+    }
+    for t in idea_generator_threads.into_iter() {
+        let checksum = t.join().unwrap();
+        idea_checksum.update(checksum);
+    }
 
     println!("Global checksums:\nIdea Generator: {}\nStudent Idea: {}\nPackage Downloader: {}\nStudent Package: {}",
-        idea, student_idea, pkg, student_pkg);
+        idea_checksum, student_idea_checksum, package_checksum, student_package_checksum);
 
     Ok(())
 }

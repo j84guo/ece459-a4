@@ -10,6 +10,8 @@ pub struct Student {
     skipped_idea: bool,
     event_sender: Sender<Event>,
     event_recv: Receiver<Event>,
+    idea_checksum: Checksum,
+    package_checksum: Checksum,
 }
 
 impl Student {
@@ -21,40 +23,32 @@ impl Student {
             idea: None,
             pkgs: vec![],
             skipped_idea: false,
+            idea_checksum: Checksum::default(),
+            package_checksum: Checksum::default(),
         }
     }
 
-    fn build_idea(
-        &mut self,
-        idea_checksum: &Arc<Mutex<Checksum>>,
-        pkg_checksum: &Arc<Mutex<Checksum>>,
-    ) {
+    fn build_idea(&mut self) {
         if let Some(ref idea) = self.idea {
             // Can only build ideas if we have acquired sufficient packages
             let pkgs_required = idea.num_packages;
             if pkgs_required <= self.pkgs.len() {
-                // TODO: Critical section too large
-                {
-                    let (mut idea_checksum, mut pkg_checksum) =
-                        (idea_checksum.lock().unwrap(), pkg_checksum.lock().unwrap());
+                // Update idea and package checksums
+                // All of the packages used in the update are deleted, along with the idea
+                self.idea_checksum.update(Checksum::with_sha256(&idea.name));
+                let pkgs_used = self.pkgs.drain(0..pkgs_required).collect::<Vec<_>>();
+                for pkg in pkgs_used.iter() {
+                    self.package_checksum.update(Checksum::with_sha256(&pkg.name));
+                }
 
-                    // Update idea and package checksums
-                    // All of the packages used in the update are deleted, along with the idea
-                    idea_checksum.update(Checksum::with_sha256(&idea.name));
-                    let pkgs_used = self.pkgs.drain(0..pkgs_required).collect::<Vec<_>>();
-                    for pkg in pkgs_used.iter() {
-                        pkg_checksum.update(Checksum::with_sha256(&pkg.name));
-                    }
-
-                    // TODO: Build message before printing?
-                    // We want the subsequent prints to be together, so we lock stdout
-                    let stdout = stdout();
-                    let mut handle = stdout.lock();
-                    writeln!(handle, "\nStudent {} built {} using {} packages\nIdea checksum: {}\nPackage checksum: {}",
-                             self.id, idea.name, pkgs_required, idea_checksum, pkg_checksum).unwrap();
-                    for pkg in pkgs_used.iter() {
-                        writeln!(handle, "> {}", pkg.name).unwrap();
-                    }
+                // TODO: Build message before printing?
+                // We want the subsequent prints to be together, so we lock stdout
+                let stdout = stdout();
+                let mut handle = stdout.lock();
+                writeln!(handle, "\nStudent {} built {} using {} packages\nIdea checksum: {}\nPackage checksum: {}",
+                         self.id, idea.name, pkgs_required, self.idea_checksum, self.package_checksum).unwrap();
+                for pkg in pkgs_used.iter() {
+                    writeln!(handle, "> {}", pkg.name).unwrap();
                 }
 
                 self.idea = None;
@@ -62,7 +56,7 @@ impl Student {
         }
     }
 
-    pub fn run(&mut self, idea_checksum: Arc<Mutex<Checksum>>, pkg_checksum: Arc<Mutex<Checksum>>) {
+    pub fn run(&mut self) -> (Checksum, Checksum) {
         loop {
             let event = self.event_recv.recv().unwrap();
             match event {
@@ -71,7 +65,7 @@ impl Student {
                     // and attempt to build it. Otherwise, the idea is skipped.
                     if self.idea.is_none() {
                         self.idea = Some(idea);
-                        self.build_idea(&idea_checksum, &pkg_checksum);
+                        self.build_idea();
                     } else {
                         self.event_sender.send(Event::NewIdea(idea)).unwrap();
                         self.skipped_idea = true;
@@ -82,7 +76,7 @@ impl Student {
                     // Getting a new package means the current idea may now be buildable, so the
                     // student attempts to build it
                     self.pkgs.push(pkg);
-                    self.build_idea(&idea_checksum, &pkg_checksum);
+                    self.build_idea();
                 }
 
                 Event::OutOfIdeas => {
@@ -101,7 +95,7 @@ impl Student {
                                 .send(Event::DownloadComplete(pkg))
                                 .unwrap();
                         }
-                        return;
+                        return (self.idea_checksum.clone(), self.package_checksum.clone());
                     }
                 }
             }

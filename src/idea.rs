@@ -17,6 +17,7 @@ pub struct IdeaGenerator {
     idea_send: Sender<Event>,
     packages_per_idea: usize,
     extra_packages: usize,
+    idea_checksum: Checksum,
 }
 
 impl IdeaGenerator {
@@ -36,6 +37,7 @@ impl IdeaGenerator {
             idea_send,
             packages_per_idea: num_packages / num_ideas,
             extra_packages: num_packages % num_ideas,
+            idea_checksum: Checksum::default(),
         }
     }
 
@@ -47,7 +49,7 @@ impl IdeaGenerator {
         return format!("{} for {}", pair.0, pair.1);
     }
 
-    pub fn run(&self, idea_checksum: Arc<Mutex<Checksum>>) {
+    pub fn run(&mut self) -> Checksum {
         // Generate a set of new ideas and place them into the event-queue
         // Update the idea checksum with all generated idea names
         for i in 0..self.num_ideas {
@@ -58,13 +60,8 @@ impl IdeaGenerator {
                 num_packages,
             };
 
-            // TODO: Maybe XOR in each thread locally and then combine later?
-            {
-                idea_checksum
-                    .lock()
-                    .unwrap()
-                    .update(Checksum::with_sha256(&idea.name));
-            }
+            // Update checksum locally
+            self.idea_checksum.update(Checksum::with_sha256(&idea.name));
 
             self.idea_send.send(Event::NewIdea(idea)).unwrap();
         }
@@ -77,5 +74,7 @@ impl IdeaGenerator {
         for _ in 0..self.num_students {
             self.idea_send.send(Event::OutOfIdeas).unwrap();
         }
+
+        self.idea_checksum.clone()
     }
 }

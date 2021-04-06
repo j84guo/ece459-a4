@@ -1,6 +1,7 @@
 use sha2::{Digest, Sha256};
 use std::fmt;
 
+#[derive(Clone)]
 #[derive(Default)]
 pub struct Checksum(String);
 
