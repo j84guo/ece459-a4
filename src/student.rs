@@ -11,6 +11,7 @@ pub struct Student {
     package_recv: Receiver<Package>,
     idea_checksum: Checksum,
     package_checksum: Checksum,
+    done_message: String,
 }
 
 impl Student {
@@ -23,6 +24,7 @@ impl Student {
             package_recv,
             idea_checksum: Checksum::default(),
             package_checksum: Checksum::default(),
+            done_message: String::new(),
         }
     }
 
@@ -41,7 +43,8 @@ impl Student {
         for package in packages {
             s += &format!("> {}\n", package.name);
         }
-        writeln!(io::stdout(), "{}", s).unwrap();
+        s += "\n";
+        self.done_message += &s;
     }
 
     pub fn run(&mut self) -> (Checksum, Checksum) {
@@ -56,6 +59,7 @@ impl Student {
                     packages.clear();
                 }
                 None => {
+                    write!(io::stdout(), "{}", self.done_message).unwrap();
                     return (self.idea_checksum.clone(), self.package_checksum.clone())
                 }
             }
