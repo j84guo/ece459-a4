@@ -1,11 +1,12 @@
 #![warn(clippy::all)]
+
+use idea::Idea;
+use package::Package;
+
 pub mod checksum;
 pub mod idea;
 pub mod package;
 pub mod student;
-
-use idea::Idea;
-use package::Package;
 
 pub enum Event {
     // Newly generated idea for students to work on

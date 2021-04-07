@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
+use crossbeam::channel::Sender;
+
 use super::checksum::Checksum;
 use super::Event;
-use crossbeam::channel::Sender;
-use std::sync::{Arc, Mutex};
 
 pub struct Package {
     pub name: String,
@@ -11,7 +13,7 @@ pub struct PackageDownloader {
     packages: Arc<Vec<String>>,
     start_i: usize,
     num_packages: usize,
-    package_send: Sender<Event>,
+    package_send: Sender<Package>,
     package_checksum: Checksum,
 }
 
@@ -19,7 +21,7 @@ impl PackageDownloader {
     pub fn new(packages: Arc<Vec<String>>,
                start_i: usize,
                num_packages: usize,
-               package_send: Sender<Event>) -> Self {
+               package_send: Sender<Package>) -> Self {
         Self {
             packages,
             start_i,
@@ -44,7 +46,7 @@ impl PackageDownloader {
             self.package_checksum.update(Checksum::with_sha256(&name));
 
             self.package_send
-                .send(Event::DownloadComplete(Package { name }))
+                .send(Package { name })
                 .unwrap();
         }
 

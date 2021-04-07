@@ -1,102 +1,62 @@
-use super::{checksum::Checksum, idea::Idea, package::Package, Event};
+use std::io::Write;
+use std::io;
+
 use crossbeam::channel::{Receiver, Sender};
-use std::io::{stdout, Write};
-use std::sync::{Arc, Mutex};
+
+use super::{checksum::Checksum, Event, idea::Idea, package::Package};
 
 pub struct Student {
     id: usize,
-    idea: Option<Idea>,
-    pkgs: Vec<Package>,
-    skipped_idea: bool,
-    event_sender: Sender<Event>,
-    event_recv: Receiver<Event>,
+    idea_recv: Receiver<Option<Idea>>,
+    package_recv: Receiver<Package>,
     idea_checksum: Checksum,
     package_checksum: Checksum,
 }
 
 impl Student {
-    pub fn new(id: usize, event_sender: Sender<Event>, event_recv: Receiver<Event>) -> Self {
+    pub fn new(id: usize,
+               idea_recv: Receiver<Option<Idea>>,
+               package_recv: Receiver<Package>) -> Self {
         Self {
             id,
-            event_sender,
-            event_recv,
-            idea: None,
-            pkgs: vec![],
-            skipped_idea: false,
+            idea_recv,
+            package_recv,
             idea_checksum: Checksum::default(),
             package_checksum: Checksum::default(),
         }
     }
 
-    fn build_idea(&mut self) {
-        if let Some(ref idea) = self.idea {
-            // Can only build ideas if we have acquired sufficient packages
-            let pkgs_required = idea.num_packages;
-            if pkgs_required <= self.pkgs.len() {
-                // Update idea and package checksums
-                // All of the packages used in the update are deleted, along with the idea
-                self.idea_checksum.update(Checksum::with_sha256(&idea.name));
-                let pkgs_used = self.pkgs.drain(0..pkgs_required).collect::<Vec<_>>();
-                for pkg in pkgs_used.iter() {
-                    self.package_checksum.update(Checksum::with_sha256(&pkg.name));
-                }
-
-                // TODO: Build message before printing?
-                // We want the subsequent prints to be together, so we lock stdout
-                let stdout = stdout();
-                let mut handle = stdout.lock();
-                writeln!(handle, "\nStudent {} built {} using {} packages\nIdea checksum: {}\nPackage checksum: {}",
-                         self.id, idea.name, pkgs_required, self.idea_checksum, self.package_checksum).unwrap();
-                for pkg in pkgs_used.iter() {
-                    writeln!(handle, "> {}", pkg.name).unwrap();
-                }
-
-                self.idea = None;
-            }
+    fn build_idea(&mut self, idea: Idea, packages: &Vec<Package>) {
+        // Update idea and package checksums
+        // All of the packages used in the update are deleted, along with the idea
+        self.idea_checksum.update(Checksum::with_sha256(&idea.name));
+        for package in packages {
+            self.package_checksum.update(Checksum::with_sha256(&package.name));
         }
+
+        // TODO: Can this be made faster somehow?
+        // We want the subsequent prints to be together, so we lock stdout
+        let mut s = format!("\nStudent {} built {} using {} packages\nIdea checksum: {}\nPackage checksum: {}",
+                            self.id, idea.name, packages.len(), self.idea_checksum, self.package_checksum);
+        for package in packages {
+            s += &format!("> {}\n", package.name);
+        }
+        writeln!(io::stdout(), "{}", s).unwrap();
     }
 
     pub fn run(&mut self) -> (Checksum, Checksum) {
+        let mut packages = Vec::<Package>::new();
         loop {
-            let event = self.event_recv.recv().unwrap();
-            match event {
-                Event::NewIdea(idea) => {
-                    // If the student is not working on an idea, then they will take the new idea
-                    // and attempt to build it. Otherwise, the idea is skipped.
-                    if self.idea.is_none() {
-                        self.idea = Some(idea);
-                        self.build_idea();
-                    } else {
-                        self.event_sender.send(Event::NewIdea(idea)).unwrap();
-                        self.skipped_idea = true;
+            match self.idea_recv.recv().unwrap() {
+                Some(idea) => {
+                    for _ in 0..idea.num_packages {
+                        packages.push(self.package_recv.recv().unwrap());
                     }
+                    self.build_idea(idea, &packages);
+                    packages.clear();
                 }
-
-                Event::DownloadComplete(pkg) => {
-                    // Getting a new package means the current idea may now be buildable, so the
-                    // student attempts to build it
-                    self.pkgs.push(pkg);
-                    self.build_idea();
-                }
-
-                Event::OutOfIdeas => {
-                    // If an idea was skipped, it may still be in the event queue.
-                    // If the student has an unfinished idea, they have to finish it, since they
-                    // might be the last student remaining.
-                    // In both these cases, we can't terminate, so the termination event is
-                    // deferred ti the back of the queue.
-                    if self.skipped_idea || self.idea.is_some() {
-                        self.event_sender.send(Event::OutOfIdeas).unwrap();
-                        self.skipped_idea = false;
-                    } else {
-                        // Any unused packages are returned to the queue upon termination
-                        for pkg in self.pkgs.drain(..) {
-                            self.event_sender
-                                .send(Event::DownloadComplete(pkg))
-                                .unwrap();
-                        }
-                        return (self.idea_checksum.clone(), self.package_checksum.clone());
-                    }
+                None => {
+                    return (self.idea_checksum.clone(), self.package_checksum.clone())
                 }
             }
         }

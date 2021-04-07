@@ -1,21 +1,25 @@
 #![warn(clippy::all)]
-use lab4::{
-    checksum::Checksum,
-    idea::IdeaGenerator,
-    package::PackageDownloader,
-    student::Student,
-    Event
-};
-// TODO: Maybe bounded?
-use crossbeam::channel::{unbounded, Receiver, Sender};
+
 use std::{env, io};
 use std::error::Error;
-use std::sync::{Arc, Mutex};
-use std::thread::spawn;
-use std::time::Duration;
-use std::path::Path;
 use std::fs::File;
 use std::io::BufRead;
+use std::path::Path;
+use std::sync::Arc;
+use std::thread::spawn;
+
+// TODO: Maybe bounded?
+use crossbeam::channel::unbounded;
+
+use lab4::{
+    checksum::Checksum,
+    Event,
+    idea::IdeaGenerator,
+    package::PackageDownloader,
+    student::Student
+};
+use lab4::idea::Idea;
+use lab4::package::Package;
 
 #[derive(Debug)]
 struct Args {
@@ -46,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         num_package_downloaders,
         num_students,
     };
-    hackathon(&args);
+    hackathon(&args)?;
     Ok(())
 }
 
@@ -77,8 +81,10 @@ fn per_thread_amount(thread_idx: usize, total: usize, threads: usize) -> usize {
 
 // TODO: Use separate channels for packages, ideas
 fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
-    // Use message-passing channel as event queue
-    let (send, recv) = unbounded::<Event>();
+    // Package channel
+    let (package_send, package_recv) = unbounded::<Package>();
+    // Idea channel
+    let (idea_send, idea_recv) = unbounded::<Option<Idea>>();
 
     // Checksums of all the generated ideas and packages
     let mut idea_checksum = Checksum::default();
@@ -96,8 +102,7 @@ fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
 
     // Spawn num_students student threads.
     for i in 0..args.num_students {
-        Sender::clone(&send);
-        let mut student = Student::new(i, send.clone(), recv.clone());
+        let mut student = Student::new(i, idea_recv.clone(), package_recv.clone());
         let thread = spawn(move || student.run());
         student_threads.push(thread);
     }
@@ -111,7 +116,7 @@ fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
             packages.clone(),
             start_i,
             num_packages,
-            send.clone()
+            package_send.clone()
         );
         start_i += num_packages;
 
@@ -135,7 +140,7 @@ fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
             num_ideas,
             num_students,
             num_packages,
-            send.clone(),
+            idea_send.clone(),
         );
         start_i += num_ideas;
 
@@ -145,18 +150,25 @@ fn hackathon(args: &Args) -> Result<(), Box<dyn Error>> {
     assert_eq!(start_i, args.num_ideas);
 
     // Join all threads
-    for t in student_threads.into_iter() {
-        let checksums = t.join().unwrap();
-        student_idea_checksum.update(checksums.0);
-        student_package_checksum.update(checksums.1);
+    // Idea generators terminate when done
+    for t in idea_generator_threads.into_iter() {
+        let checksum = t.join().unwrap();
+        idea_checksum.update(checksum);
     }
+    // After ideas have been generated, push poison pills for students
+    for _ in 0..args.num_students {
+        idea_send.send(None);
+    }
+    // Package downloaders terminate when done
     for t in package_downloader_threads.into_iter() {
         let checksum = t.join().unwrap();
         package_checksum.update(checksum);
     }
-    for t in idea_generator_threads.into_iter() {
-        let checksum = t.join().unwrap();
-        idea_checksum.update(checksum);
+    // Student threads terminate after receiving a poison pill
+    for t in student_threads.into_iter() {
+        let checksums = t.join().unwrap();
+        student_idea_checksum.update(checksums.0);
+        student_package_checksum.update(checksums.1);
     }
 
     println!("Global checksums:\nIdea Generator: {}\nStudent Idea: {}\nPackage Downloader: {}\nStudent Package: {}",

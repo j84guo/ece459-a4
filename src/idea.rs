@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
+use crossbeam::channel::Sender;
+
 use super::checksum::Checksum;
 use super::Event;
-use crossbeam::channel::Sender;
-use std::sync::{Arc, Mutex};
 
 pub struct Idea {
     pub name: String,
@@ -14,7 +16,7 @@ pub struct IdeaGenerator {
     num_ideas: usize,
     num_students: usize,
     num_packages: usize,
-    idea_send: Sender<Event>,
+    idea_send: Sender<Option<Idea>>,
     packages_per_idea: usize,
     extra_packages: usize,
     idea_checksum: Checksum,
@@ -26,7 +28,7 @@ impl IdeaGenerator {
                num_ideas: usize,
                num_students: usize,
                num_packages: usize,
-               idea_send: Sender<Event>) -> Self {
+               idea_send: Sender<Option<Idea>>) -> Self {
         assert_ne!(num_ideas, 0);
         return Self {
             ideas,
@@ -44,7 +46,8 @@ impl IdeaGenerator {
     // Idea names are generated from cross products between product names and customer names. The
     // index wraps around once it reaches the number of tuples in the products vs customers cross
     // product.
-    fn get_next_idea_name(&self, i: usize) -> String {
+    fn get_next_idea_name(&self,
+                          i: usize) -> String {
         let pair = &self.ideas[i % self.ideas.len()];
         return format!("{} for {}", pair.0, pair.1);
     }
@@ -63,16 +66,7 @@ impl IdeaGenerator {
             // Update checksum locally
             self.idea_checksum.update(Checksum::with_sha256(&idea.name));
 
-            self.idea_send.send(Event::NewIdea(idea)).unwrap();
-        }
-
-        // Push student termination events into the event queue.
-        //
-        // It seems like each idea generator thread pushes num_students poison pills so that there
-        // are guaranteed to be enough for all students no matter how many idea generators there
-        // are.
-        for _ in 0..self.num_students {
-            self.idea_send.send(Event::OutOfIdeas).unwrap();
+            self.idea_send.send(Some(idea)).unwrap();
         }
 
         self.idea_checksum.clone()
