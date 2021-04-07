@@ -38,12 +38,11 @@ impl Student {
 
         // TODO: Can this be made faster somehow?
         // We want the subsequent prints to be together, so we lock stdout
-        let mut s = format!("\nStudent {} built {} using {} packages\nIdea checksum: {}\nPackage checksum: {}",
+        let mut s = format!("\nStudent {} built {} using {} packages\nIdea checksum: {}\nPackage checksum: {}\n",
                             self.id, idea.name, packages.len(), self.idea_checksum, self.package_checksum);
         for package in packages {
             s += &format!("> {}\n", package.name);
         }
-        s += "\n";
         self.done_message += &s;
     }
 
