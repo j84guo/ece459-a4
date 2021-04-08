@@ -21,7 +21,7 @@ idea or package, this code performs the file reading one time only by the main t
 loaded into vectors and shared with the relevant threads using Arc, allowing them to use indexed access to access ideas
 and packages respectively.
 
-In a similar vein, the Checksum struct now stores raw bytes as a Vec<u8> as opposed to the hex encoded bytes as a 
+In a similar vein, the Checksum struct now stores raw bytes as a Vec<u8> as opposed to the hex-encoded bytes as a 
 String. This way, hex decoding/encoding is not necessary when updating a checksum - encoding is only necessary when
 we'd like to print it.
 
