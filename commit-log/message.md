@@ -1,11 +1,3 @@
-Don't re-read files each time
-Don't hex encode/decode unnecessarily
-
-Do XOR's locally until it's time to combine
-Use separate channels
-
-Batch final student prints
-
 # Title
 
 Refactor message passing, reduce redundant work and batch print statements.
